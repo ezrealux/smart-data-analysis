@@ -91,7 +91,9 @@ class SingleModel(nn.Module):
     def init(self, input_size, hidden_sizes, prior='Smile', device='cpu'):
         super(SingleModel, self).__init__()
         self.device = device
-        if prior == 'SSVI':
+        if prior == 'BS':
+            self.Prior = BSModel()
+        elif prior == 'SSVI':
             self.Prior = SSVIModel()
         elif prior == 'Smile':
             self.Prior = SmileModel()
