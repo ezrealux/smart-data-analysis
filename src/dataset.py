@@ -279,4 +279,4 @@ class DataProcessor():
         y = from_numpy(test_dataset[['total_var']].to_numpy(dtype='float64'))
         y_atm = from_numpy(test_dataset[['y_atm']].to_numpy(dtype='float64'))
 
-        return tau, logm, y, y_atm
+        return tau, logm, y, y_atm, test_dataset
