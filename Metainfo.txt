@@ -1,0 +1,16 @@
+Name of Quantlet: DEDA_2024_NYCU
+
+Published in: DEDA class 2024
+
+Description: Trying to use NN model to predict the Taiwan index implied volatility. 
+
+Submitted: 04 April 2024
+
+Keywords: 
+- Implied volatility
+- NN model
+- prediction 
+- Financial engineering
+- Options 
+
+Author: Bo-Hsien Wu, Wei-Chen Liao, Yan,Lin ,Liu,Yun-De
