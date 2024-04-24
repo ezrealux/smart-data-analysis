@@ -13,4 +13,4 @@ Keywords:
 - Financial engineering
 - Options 
 
-Author: Bo-Hsien Wu, Wei-Chen Liao, Yan,Lin ,Liu,Yun-De
+Author: Bo-Hsien Wu, Wei-Chen Liao, Yen,Lin ,Liu,Yun-De
