@@ -24,6 +24,7 @@ class SSVIModel(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, logm, yATM): # (invm, tau): (inverse moneyness, time to maturity)
+        logm.requires_grad = True
         rho = self.tanh(self.raw_rho)
 
         if self.phi_fun == 'heston_like':
@@ -35,10 +36,17 @@ class SSVIModel(nn.Module):
             phi = eta / (torch.pow(yATM, gamma) * torch.pow(1 + yATM, 1 - gamma))
 
         output = yATM/2 * (1 + rho*phi*logm + torch.sqrt(torch.square(phi*logm) + 2*rho*phi*logm + 1))
-        return output
+        
+        total_output = torch.sum(output)
+        grad_ttm1 = torch.zeros_like(logm)
+        grad_logm1 = torch.autograd.grad(total_output, logm, retain_graph=True, create_graph=True)[0]
+        total_grad_logm1 = torch.sum(grad_logm1)
+        grad_logm2 = torch.autograd.grad(total_grad_logm1, logm)[0]
+
+        return output, grad_ttm1, grad_logm1, grad_logm2
 
 class SmileModel(nn.Module):
-    def __init__(self, hidden_sizes, device='cpu', activation='softplus'):
+    def __init__(self, hidden_sizes=[5]*3, device='cpu', activation='softplus'):
         super(SmileModel, self).__init__()
         self.device = device
         self.J = hidden_sizes[0]
@@ -62,6 +70,8 @@ class SmileModel(nn.Module):
         self.smile_function = lambda logm : torch.sqrt(logm*torch.tanh(logm+0.5) + torch.tanh(-logm/2)+0.0005) #+0.0005 to avoid value too small
 
     def forward(self, ttm, logm): # (invm, tau): (inverse moneyness, time to maturity)
+        ttm.requires_grad = True
+        logm.requires_grad = True
         batch_size = ttm.shape[0]
 
         term_logm = self.smile_function(torch.tile(self.bias_logm, (batch_size, 1)) + logm @ torch.exp(self.weights_logm)) #matrix multiplication
@@ -73,7 +83,14 @@ class SmileModel(nn.Module):
             out_hidden = self.activation(hidden_layer(out_hidden))
         
         output = self.output_layers(out_hidden)
-        return output
+
+        total_output = torch.sum(output)
+        grad1 = torch.autograd.grad(total_output, (ttm, logm), retain_graph=True, create_graph=True)
+        grad_ttm1 = grad1[0].clone()
+        grad_logm1 = grad1[1].clone()
+        total_grad_logm1 = torch.sum(grad_logm1)
+        grad_logm2 = torch.autograd.grad(total_grad_logm1, logm)[0]
+        return output, grad_ttm1, grad_logm1, grad_logm2
 
 class SingleModel(nn.Module):
     def __init__(self, hidden_sizes, prior='SSVI', device='cpu'):
@@ -86,10 +103,14 @@ class SingleModel(nn.Module):
         self.NN = SmileModel(hidden_sizes)
 
     def forward(self, tau, logm, yATM):
-        output_Prior = self.Prior(logm, yATM)
-        output_NN = self.NN(tau, logm)
+        output_Prior, grad_ttm1_prior, grad_logm1_prior, grad_logm2_prior = self.Prior(logm, yATM)
+        output_NN, grad_ttm1_NN, grad_logm1_NN, grad_logm2_NN = self.NN(tau, logm)
         output = output_Prior * output_NN
-        return output
+
+        grad_ttm1 = grad_ttm1_prior*output_NN + grad_ttm1_NN*output_Prior
+        grad_logm1 = grad_logm1_prior*output_NN + grad_logm1_NN*output_Prior
+        grad_logm2 = grad_logm2_prior*output_NN + grad_logm1_prior*grad_logm1_NN*2 + grad_logm2_NN*output_Prior
+        return output, grad_ttm1, grad_logm1, grad_logm2
     
 class SoftmaxModel(nn.Module):
     def __init__(self, ensemble_num):
@@ -118,13 +139,29 @@ class MultiModel(nn.Module):
             self.ensemble_list.append(SingleModel(hidden_sizes))
 
     def forward(self, ttm, logm, yATM):
-        outputs = [self.ensemble_list[i](ttm, logm, yATM) for i in range(len(self.ensemble_list))]
+        outputs = []
+        grad_ttm1s = []
+        grad_logm1s = []
+        grad_logm2s = []
+        for model in self.ensemble_list:
+            output, grad_ttm1, grad_logm1, grad_logm2 = model(ttm, logm, yATM)
+            outputs.append(output)
+            grad_ttm1s.append(grad_ttm1)
+            grad_logm1s.append(grad_logm1)
+            grad_logm2s.append(grad_logm2)
         outputs = torch.cat(outputs, dim=1)
+        grad_ttm1s = torch.cat(grad_ttm1s, dim=1)
+        grad_logm1s = torch.cat(grad_logm1s, dim=1)
+        grad_logm2s = torch.cat(grad_logm2s, dim=1)
+        
         weights = self.SoftmaxModel(ttm, logm) #(batch, ensenble)
         
         output = torch.sum(outputs*weights, dim=1, keepdim=True)
-        total_output = torch.sum(output)
-        return output#, total_output
+        grad_ttm1 = torch.sum(grad_ttm1s*weights, dim=1, keepdim=True)
+        grad_logm1 = torch.sum(grad_logm1s*weights, dim=1, keepdim=True)
+        grad_logm2 = torch.sum(grad_logm2s*weights, dim=1, keepdim=True)
+
+        return output, grad_ttm1, grad_logm1, grad_logm2
     
 class SimpleLoss(nn.Module):
     def __init__(self):
